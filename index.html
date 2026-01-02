@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>俄羅斯方塊 - 豪華視覺版</title>
+    <style>
+        body { 
+            background: radial-gradient(circle, #1e2a38 0%, #0b0f14 100%); 
+            color: #fff; font-family: 'Segoe UI', sans-serif; text-align: center; 
+            margin: 0; padding: 20px; overflow: hidden;
+        }
+        .container { display: flex; justify-content: center; align-items: flex-start; gap: 20px; }
+        .side-panel { background: rgba(0,0,0,0.5); padding: 15px; border-radius: 10px; border: 1px solid #444; }
+        canvas { 
+            border: 4px solid #333; background: #000; 
+            box-shadow: 0 0 30px rgba(0,0,0,0.8); border-radius: 5px;
+        }
+        #next { background: #111; border: 2px solid #444; margin-top: 10px; }
+        .ui-panel { font-size: 28px; font-weight: bold; margin-bottom: 10px; color: #00d4ff; text-shadow: 0 0 10px rgba(0,212,255,0.5); }
+        button { 
+            padding: 12px 25px; font-size: 16px; cursor: pointer; border-radius: 5px; 
+            border: none; background: linear-gradient(to bottom, #444, #222); color: white; transition: 0.3s;
+        }
+        button:hover { background: #555; transform: scale(1.05); }
+        input { padding: 12px; border-radius: 5px; border: 1px solid #444; background: #222; color: #fff; margin-right: 5px; }
+        kbd { background: #333; padding: 2px 6px; border-radius: 4px; color: #ffeb3b; }
+    </style>
+</head>
+<body>
+    <h1>TETRIS ULTIMATE</h1>
+    <div class="ui-panel">SCORE: <span id="score">0</span></div>
+    
+    <div class="container">
+        <canvas id="tetris" width="240" height="400"></canvas>
+        
+        <div class="side-panel">
+            <div>NEXT PIECE</div>
+            <canvas id="next" width="80" height="80"></canvas>
+            <p style="font-size: 12px; color: #888; margin-top: 20px;">
+                <kbd>↑</kbd> Rotate<br><br>
+                <kbd>←</kbd> <kbd>→</kbd> Move<br><br>
+                <kbd>Space</kbd> Drop
+            </p>
+            <div style="margin-top: 20px;">
+                <input type="text" id="playerName" placeholder="Player Name" style="width: 100px;"><br><br>
+                <button onclick="startGame()">START</button><br><br>
+                <button onclick="location.href='leaderboard.html'" style="background: #28a745;">RANK</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const scriptURL = "https://script.google.com/macros/s/AKfycbzXuesAAOHEpUcXocw5YByLNggG6Oyjc7NxkqdnAL_DNrg0S5OLlqLGRsfU1a5WujpZ/exec";
+        const canvas = document.getElementById('tetris');
+        const context = canvas.getContext('2d');
+        const nextCanvas = document.getElementById('next');
+        const nextContext = nextCanvas.getContext('2d');
+
+        context.scale(20, 20);
+        nextContext.scale(20, 20);
+
+        let arena = createMatrix(12, 20);
+        let player = { pos: {x: 0, y: 0}, matrix: null, next: null, score: 0 };
+        const colors = [null, '#FF0D72', '#0DC2FF', '#0DFF72', '#F538FF', '#FF8E0D', '#FFE138', '#3877FF'];
+
+        function createMatrix(w, h) { return Array.from({length: h}, () => Array(w).fill(0)); }
+
+        function createPiece(type) {
+            if (type === 'I') return [[0,1,0,0],[0,1,0,0],[0,1,0,0],[0,1,0,0]];
+            if (type === 'T') return [[0,7,0],[7,7,7],[0,0,0]];
+            if (type === 'O') return [[4,4],[4,4]];
+            if (type === 'L') return [[0,2,0],[0,2,0],[0,2,2]];
+            if (type === 'J') return [[0,3,0],[0,3,0],[3,3,0]];
+            if (type === 'S') return [[0,6,6],[6,6,0],[0,0,0]];
+            if (type === 'Z') return [[5,5,0],[0,5,5],[0,0,0]];
+        }
+
+        // --- 優化：畫出具備立體感的方塊 ---
+        function drawBlock(ctx, x, y, colorIndex) {
+            const color = colors[colorIndex];
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, 1, 1);
+            
+            // 畫出方塊邊緣 (使看起來一格一格的)
+            ctx.lineWidth = 0.05;
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.strokeRect(x, y, 1, 1);
+            
+            // 內陰影效果
+            ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            ctx.fillRect(x + 0.8, y, 0.2, 1);
+            ctx.fillRect(x, y + 0.8, 1, 0.2);
+        }
+
+        function draw() {
+            // 背景網格
+            context.fillStyle = '#000';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            
+            drawMatrix(arena, {x: 0, y: 0}, context);
+            drawMatrix(player.matrix, player.pos, context);
+            drawNext();
+        }
+
+        function drawMatrix(matrix, offset, ctx) {
+            if (!matrix) return;
+            matrix.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        drawBlock(ctx, x + offset.x, y + offset.y, value);
+                    }
+                });
+            });
+        }
+
+        function drawNext() {
+            nextContext.fillStyle = '#111';
+            nextContext.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+            if (player.next) {
+                // 置中顯示下一個方塊
+                drawMatrix(player.next, {x: 1, y: 1}, nextContext);
+            }
+        }
+
+        function rotate(matrix, dir) {
+            for (let y = 0; y < matrix.length; ++y) {
+                for (let x = 0; x < y; ++x) [matrix[x][y], matrix[y][x]] = [matrix[y][x], matrix[x][y]];
+            }
+            if (dir > 0) matrix.forEach(row => row.reverse()); else matrix.reverse();
+        }
+
+        function collide(arena, player) {
+            const [m, o] = [player.matrix, player.pos];
+            for (let y = 0; y < m.length; ++y) {
+                for (let x = 0; x < m[y].length; ++x) {
+                    if (m[y][x] !== 0 && (arena[y + o.y] && arena[y + o.y][x + o.x]) !== 0) return true;
+                }
+            }
+            return false;
+        }
+
+        function playerDrop() {
+            player.pos.y++;
+            if (collide(arena, player)) {
+                player.pos.y--;
+                merge(arena, player);
+                playerReset();
+                arenaSweep();
+            }
+            dropCounter = 0;
+        }
+
+        function merge(arena, player) {
+            player.matrix.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) arena[y + player.pos.y][x + player.pos.x] = value;
+                });
+            });
+        }
+
+        function playerHardDrop() {
+            while (!collide(arena, player)) { player.pos.y++; }
+            player.pos.y--;
+            merge(arena, player);
+            playerReset();
+            arenaSweep();
+        }
+
+        // --- 優化：消行特效 ---
+        function arenaSweep() {
+            outer: for (let y = arena.length - 1; y >= 0; --y) {
+                for (let x = 0; x < arena[y].length; ++x) {
+                    if (arena[y][x] === 0) continue outer;
+                }
+                
+                // 特效：消行前讓該行閃白光 (簡單模擬)
+                context.fillStyle = '#fff';
+                context.fillRect(0, y, 12, 1);
+                
+                const row = arena.splice(y, 1)[0].fill(0);
+                arena.unshift(row);
+                ++y;
+                player.score += 10;
+                document.getElementById('score').innerText = player.score;
+            }
+        }
+
+        function playerReset() {
+            const pieces = 'ILJOTSZ';
+            if (!player.next) player.next = createPiece(pieces[pieces.length * Math.random() | 0]);
+            
+            player.matrix = player.next;
+            player.next = createPiece(pieces[pieces.length * Math.random() | 0]);
+            
+            player.pos.y = 0;
+            player.pos.x = (arena[0].length / 2 | 0) - (player.matrix[0].length / 2 | 0);
+            
+            if (collide(arena, player)) {
+                const s = player.score;
+                alert("GAME OVER! SCORE: " + s);
+                const name = document.getElementById('playerName').value || "Guest";
+                fetch(`${scriptURL}?action=saveScore&name=${encodeURIComponent(name)}&score=${s}`);
+                arena.forEach(row => row.fill(0));
+                player.score = 0;
+                document.getElementById('score').innerText = 0;
+            }
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.keyCode === 37) { player.pos.x--; if(collide(arena, player)) player.pos.x++; }
+            else if (e.keyCode === 39) { player.pos.x++; if(collide(arena, player)) player.pos.x--; }
+            else if (e.keyCode === 40) playerDrop();
+            else if (e.keyCode === 38) { rotate(player.matrix, 1); if(collide(arena, player)) rotate(player.matrix, -1); }
+            else if (e.keyCode === 32) { e.preventDefault(); playerHardDrop(); }
+        });
+
+        function startGame() { 
+            arena.forEach(row => row.fill(0));
+            player.score = 0;
+            player.next = null;
+            document.getElementById('score').innerText = 0;
+            playerReset(); 
+            if(!requestId) update(); 
+        }
+
+        let lastTime = 0, dropCounter = 0, requestId;
+        function update(time = 0) {
+            const dt = time - lastTime; lastTime = time;
+            dropCounter += dt; if (dropCounter > 1000) { playerDrop(); }
+            draw(); 
+            requestId = requestAnimationFrame(update);
+        }
+    </script>
+</body>
+</html>
